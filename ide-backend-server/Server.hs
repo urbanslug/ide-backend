@@ -27,19 +27,18 @@ import qualified Data.List         as List
 import qualified Data.Text         as Text
 import qualified System.Directory  as Dir
 
-#ifdef mingw32_HOST_OS
-import System.Posix.Types (Fd)
-import System.Posix.Types (ProcessID)
-#else
-import System.Posix (Fd, createSession)
+#ifdef VERSION_unix
+import System.Posix (createSession)
 import System.Posix.IO
 import System.Posix.Files (createNamedPipe)
 import System.Posix.Process (forkProcess, getProcessStatus)
 import System.Posix.Terminal (openPseudoTerminal)
-import System.Posix.Signals (signalProcess, sigTERM)
 import qualified Posix
-import System.Posix.Types (ProcessID)
 #endif
+
+import IdeSession.Util.PortableProcess
+import IdeSession.Util.PortableIO
+import System.IO (IOMode(..))
 
 import IdeSession.GHC.API
 import IdeSession.RPC.Server
@@ -761,7 +760,7 @@ ghcHandleRun RpcConversation{..} runCmd = do
     blockSize = 4096
 
     -- Setup loopback pipe so we can capture runStmt's stdout/stderr
-    redirectStdout :: Ghc (Handle, Fd, Fd)
+    redirectStdout :: Ghc (Handle, FileDescriptor, FileDescriptor)
     redirectStdout = liftIO $ do
       -- Create pipe
       (stdOutputRd, stdOutputWr) <- liftIO createPipe
@@ -774,11 +773,11 @@ ghcHandleRun RpcConversation{..} runCmd = do
       closeFd stdOutputWr
 
       -- Convert to the read end to a handle and return
-      stdOutputRd' <- fdToHandle stdOutputRd
+      stdOutputRd' <- fdToHandle stdOutputRd ReadMode
       return (stdOutputRd', stdOutputBackup, stdErrorBackup)
 
     -- Setup loopback pipe so we can write to runStmt's stdin
-    redirectStdin :: Ghc (Handle, Fd)
+    redirectStdin :: Ghc (Handle, FileDescriptor)
     redirectStdin = liftIO $ do
       -- Create pipe
       (stdInputRd, stdInputWr) <- liftIO createPipe
@@ -789,7 +788,7 @@ ghcHandleRun RpcConversation{..} runCmd = do
       closeFd stdInputRd
 
       -- Convert the write end to a handle and return
-      stdInputWr' <- fdToHandle stdInputWr
+      stdInputWr' <- fdToHandle stdInputWr WriteMode
       return (stdInputWr', stdInputBackup)
 
 -- | Handle a set-environment request
@@ -849,7 +848,7 @@ _forkGhc :: Ghc () -> Ghc ThreadId
 _forkGhc = unsafeLiftIO forkIO
 
 -- | forkProcess within the `Ghc` monad. Use with extreme caution.
-forkGhcProcess :: Ghc () -> Ghc ProcessID
+forkGhcProcess :: Ghc () -> Ghc Pid
 forkGhcProcess = unsafeLiftIO forkProcess
 
 -- | Lifted version of concurrentConversation
@@ -863,13 +862,5 @@ ghcConcurrentConversation f requestR responseW errorLog =
 
 -- Bad.
 #if mingw32_HOST_OS
-dupTo = error "Not on windows."
-dup = error "Not on windows."
-closeFd = error "Not on windows."
-stdError = error "Not on windows."
-stdOutput = error "Not on windows."
-stdInput  = error "Not on windows."
-fdToHandle = error "Not on windows."
-createPipe = error "Not on windows."
 forkProcess = error "Not on windows."
-#endif  
+#endif
