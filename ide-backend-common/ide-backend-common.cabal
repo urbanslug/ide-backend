@@ -17,6 +17,7 @@ library
                       IdeSession.Util.BlockingOps
                       IdeSession.Util.PrettyVal
                       IdeSession.Util.PortableProcess
+                      IdeSession.Util.PortableIO
                       IdeSession.GHC.API
                       IdeSession.GHC.Requests
                       IdeSession.GHC.Responses
@@ -24,7 +25,6 @@ library
                       IdeSession.RPC.Server
                       IdeSession.RPC.Stream
                       IdeSession.RPC.Sockets
-                      IdeSession.RPC.PortablePipes
                       IdeSession.Strict.Container
                       IdeSession.Strict.IntMap
                       IdeSession.Strict.List
