@@ -12,6 +12,7 @@ import Data.Accessor (accessor, (.>))
 import Data.Accessor.Monad.MTL.State (set)
 import Data.Function (on)
 import System.Environment (getEnvironment)
+import System.IO.Temp (withSystemTempDirectory)
 import qualified Control.Exception as Ex
 import qualified Data.List         as List
 import qualified Data.Text         as Text
@@ -35,6 +36,7 @@ import Hooks
 import Run
 import HsWalk
 import GhcShim
+import RTS
 import Auxiliary
 import RequestRunning
 
@@ -45,14 +47,21 @@ import RequestRunning
 
 -- | Start the RPC server. Used from within the server executable.
 ghcServer :: [String] -> IO ()
-ghcServer = rpcServer ghcServerEngine
+ghcServer args =
+  withSystemTempDirectory "ghc-server." $ \tmpDir -> do
+    -- Prepare the rts support module
+    rtsInfo <- deployRts tmpDir
+
+    -- Launch the server
+    rpcServer (ghcServerEngine rtsInfo) args
+
 
 -- | The GHC server engine proper.
 --
 -- This function runs in end endless loop inside the @Ghc@ monad, making
 -- incremental compilation possible.
-ghcServerEngine :: FilePath -> RpcConversation -> IO ()
-ghcServerEngine errorLog conv@RpcConversation{..} = do
+ghcServerEngine :: RtsInfo -> FilePath -> RpcConversation -> IO ()
+ghcServerEngine rtsInfo errorLog conv@RpcConversation{..} = do
   -- The initial handshake with the client
   (configGenerateModInfo, initOpts, sourceDir, sessionDir, distDir) <- handleInit conv
   -- Submit static opts and get back leftover dynamic opts.
@@ -67,7 +76,7 @@ ghcServerEngine errorLog conv@RpcConversation{..} = do
   -- Start handling requests. From this point on we don't leave the GHC monad.
   runFromGhc $ do
     -- Register startup options and perhaps our plugin in dynamic flags.
-    initSession distDir configGenerateModInfo dOpts errsRef stRef pluginRef progressCallback
+    initSession distDir configGenerateModInfo dOpts rtsInfo errsRef stRef pluginRef progressCallback
     -- We store the DynFlags _after_ setting the "static" options, so that
     -- we restore to this state before every call to updateDynamicOpts
     -- Note that this happens _after_ we have called setSessionDynFlags
@@ -142,12 +151,13 @@ ghcServerEngine errorLog conv@RpcConversation{..} = do
 initSession :: FilePath
             -> Bool
             -> DynamicOpts
+            -> RtsInfo
             -> StrictIORef (Strict [] SourceError)
             -> StrictIORef ExtractIdsSuspendedState
             -> StrictIORef (Strict (Map ModuleName) PluginResult)
             -> (String -> IO ())
             -> Ghc ()
-initSession distDir modInfo dOpts errsRef stRef pluginRef callback = do
+initSession distDir modInfo dOpts rtsInfo errsRef stRef pluginRef callback = do
     flags          <- getSessionDynFlags
     (flags', _, _) <- parseDynamicFlags flags $ dOpts ++ dynOpts
 
@@ -159,8 +169,8 @@ initSession distDir modInfo dOpts errsRef stRef pluginRef callback = do
   where
     dynOpts :: DynamicOpts
     dynOpts = optsToDynFlags [
-        -- Just in case the user specified -hide-all-packages.
-        "-package ide-backend-rts"
+        "-package-db " ++ rtsPackageDb rtsInfo
+      , "-package "    ++ rtsPackage   rtsInfo
 
         -- Include cabal_macros.h
       , "-optP-include"
