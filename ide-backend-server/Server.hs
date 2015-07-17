@@ -89,7 +89,7 @@ ghcServerEngine errorLog conv@RpcConversation{..} = do
                 conv pluginRef importsRef errsRef sourceDir
                 genCode targets configGenerateModInfo
               return args
-            ReqRun runCmd -> runCommand args sessionDir runCmd
+            ReqRun runCmd -> runCommand conv args sessionDir runCmd
             ReqSetEnv env -> do
               ghcHandleSetEnv conv initEnv env
               return args
