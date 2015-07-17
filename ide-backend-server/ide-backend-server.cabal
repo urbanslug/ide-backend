@@ -40,6 +40,7 @@ executable ide-backend-server
                       RTS
   if !os(windows)
     other-modules:    Posix
+
   build-depends:      base < 10,
                       ghc                  == 7.4.* || == 7.8.* || == 7.10.*,
                       containers           >= 0.4.1   && < 1,
@@ -61,8 +62,9 @@ executable ide-backend-server
                       tar                  >= 0.3     && < 0.5,
                       zlib                 >= 0.5.3   && < 0.7,
                       file-embed           >= 0.0     && < 0.1,
-                      ide-backend-common   >= 0.9     && < 0.10
+                      ide-backend-common   >= 0.9     && < 0.10,
                       network
+
   if os(windows)
      build-depends: unix-compat
   if !os(windows)
