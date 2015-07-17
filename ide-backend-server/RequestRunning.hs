@@ -4,18 +4,19 @@
 -- for conditional compilation on non-Unix platforms.
 module RequestRunning (runCommand) where
 
+import IdeSession.RPC.API
 import IdeSession.GHC.Requests
 import GhcMonad(Ghc(..))
 
 #ifdef VERSION_unix
 
-# Unix specific imports
+-- Unix specific imports
 import System.Posix (createSession)
 import System.Posix.Process (forkProcess, getProcessStatus)
 import System.Posix.Terminal (openPseudoTerminal)
 import qualified Posix
 
-# General imports
+-- General imports
 import Network
 import Control.Concurrent (ThreadId, throwTo, forkIO, myThreadId)
 import Control.Concurrent.Async (async, withAsync)
@@ -35,7 +36,6 @@ import qualified System.Directory  as Dir
 
 import qualified GHC
 
-import IdeSession.RPC.API
 import IdeSession.RPC.Server
 import IdeSession.GHC.API
 import IdeSession.RPC.Sockets
@@ -59,26 +59,31 @@ import IdeSession.Util
 #endif
 
 
-runCommand :: [String] -> FilePath -> RunCmd -> Ghc [String]
+runCommand :: RpcConversation -> [String] -> FilePath -> RunCmd -> Ghc [String]
 
 
 #ifndef VERSION_unix
-runCommand _ _ _ = liftIO $ Ex.throwIO $ UnsupportedOnNonUnix "Cannot run commands on non-Unix platforms"
+runCommand _ _ _ _ = liftIO $ Ex.throwIO $ UnsupportedOnNonUnix "Cannot run commands on non-Unix platforms"
 #else
-runCommand args sessionDir runCmd
+runCommand conv args sessionDir runCmd
   | runCmdPty runCmd = do
         fds <- liftIO openPseudoTerminal
         conversationTuple <- startConcurrentConversation sessionDir $ \_ _ _ ->
           ghcWithArgs args $ ghcHandleRunPtySlave fds runCmd
         liftIO $ runPtyMaster fds conversationTuple
-        liftIO $ put conversationTuple
+        rpcConversationTuple conv conversationTuple
         return args
   | otherwise = do
         conversationTuple <- startConcurrentConversation sessionDir $
           ghcConcurrentConversation $ \_errorLog' conv' ->
             ghcWithArgs args $ ghcHandleRun conv' runCmd
-        liftIO $ put conversationTuple
+        rpcConversationTuple conv conversationTuple
         return args
+
+rpcConversationTuple :: RpcConversation -> (Pid, Socket, Socket, FilePath) -> Ghc ()
+rpcConversationTuple RpcConversation{..} (pid, stdin, stdout, errorLogPath) = do
+  [stdinPort, stdoutPort] <- liftIO $ mapM socketPort [stdin, stdout]
+  liftIO $ put (pid, WriteChannel stdinPort, ReadChannel stdoutPort, errorLogPath)
 
 -- | Handle a run request
 ghcHandleRun :: RpcConversation -> RunCmd -> Ghc ()
@@ -276,7 +281,7 @@ runPtyMaster (masterFd, slaveFd) (processId, stdin, stdout, errorLog) = do
 startConcurrentConversation
   :: FilePath
   -> (Socket -> Socket -> FilePath -> Ghc ())
-  -> Ghc (Pid, WriteChannel, ReadChannel, FilePath)
+  -> Ghc (Pid, Socket, Socket, FilePath)
 startConcurrentConversation sessionDir inner = do
   -- Ideally, we'd have the child process create the temp directory and
   -- communicate the name back to us, so that the child process can remove the
@@ -312,7 +317,5 @@ startConcurrentConversation sessionDir inner = do
   liftIO $ void $ forkIO $
     void $ getProcessStatus True False processId
 
-  [stdinPort, stdoutPort] <- liftIO $ mapM socketPort [stdin, stdout]
-
-  return (processId, WriteChannel stdinPort, ReadChannel stdoutPort, errorLog)
+  return (processId, stdin, stdout, errorLog)
 #endif
